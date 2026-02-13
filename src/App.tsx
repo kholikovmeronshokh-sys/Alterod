@@ -77,6 +77,9 @@ const copy = {
     share: 'Share',
     shareCopied: 'Track link copied',
     shareFailed: 'Could not share this track',
+    autoDj: 'Auto-DJ smart shuffle is on',
+    shortcuts: 'Shortcuts',
+    shortcutsHint: 'Space play/pause, Left/Right prev-next, L loop',
   },
   ru: {
     heroTitle: 'Музыкальный mood-движок для продуктовых команд',
@@ -104,6 +107,9 @@ const copy = {
     share: 'Поделиться',
     shareCopied: 'Ссылка на трек скопирована',
     shareFailed: 'Не удалось поделиться треком',
+    autoDj: 'Auto-DJ и умный shuffle включены',
+    shortcuts: 'Клавиши',
+    shortcutsHint: 'Space пуск/пауза, Left/Right назад-вперед, L повтор',
   },
 } as const
 
@@ -263,6 +269,7 @@ function App() {
   const [shareNotice, setShareNotice] = useState('')
   const trackCache = useRef<Partial<Record<MoodId, Track[]>>>({})
   const audioRefs = useRef<Record<number, HTMLAudioElement | null>>({})
+  const playedTrackIdsRef = useRef<Set<number>>(new Set())
 
   const activeMood = useMemo(
     () => MOODS.find((mood) => mood.id === activeMoodId) ?? MOODS[0],
@@ -290,6 +297,24 @@ function App() {
     })
   }
 
+  function toggleCurrentPlayback() {
+    if (!currentTrackId) {
+      if (tracks[0]) playTrackById(tracks[0].id)
+      return
+    }
+
+    const audio = audioRefs.current[currentTrackId]
+    if (!audio) return
+
+    if (audio.paused) {
+      void audio.play().catch(() => {
+        setIsCurrentPlaying(false)
+      })
+    } else {
+      audio.pause()
+    }
+  }
+
   function playNeighbor(direction: -1 | 1) {
     if (!tracks.length) return
     const startIndex = currentIndex >= 0 ? currentIndex : 0
@@ -299,6 +324,20 @@ function App() {
     const nextTrack = tracks[nextIndex]
     if (!nextTrack) return
     playTrackById(nextTrack.id)
+  }
+
+  function getSmartNextTrackId(currentId: number): number | null {
+    const candidates = tracks.filter((track) => track.id !== currentId)
+    if (!candidates.length) return null
+
+    let unplayed = candidates.filter((track) => !playedTrackIdsRef.current.has(track.id))
+    if (!unplayed.length) {
+      playedTrackIdsRef.current = new Set([currentId])
+      unplayed = candidates
+    }
+
+    const randomIndex = Math.floor(Math.random() * unplayed.length)
+    return unplayed[randomIndex]?.id ?? null
   }
 
   function setSingleLoopTrack(trackId: number | null) {
@@ -376,6 +415,7 @@ function App() {
     setIsCurrentPlaying(false)
     setCurrentTime(0)
     setDuration(0)
+    playedTrackIdsRef.current = new Set()
 
     const cached = trackCache.current[activeMood.id]
     if (cached?.length) {
@@ -464,6 +504,45 @@ function App() {
     const timer = window.setTimeout(() => setShareNotice(''), 1800)
     return () => window.clearTimeout(timer)
   }, [shareNotice])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isTypingContext =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT' ||
+        target?.isContentEditable
+
+      if (isTypingContext) return
+
+      if (event.code === 'Space') {
+        event.preventDefault()
+        toggleCurrentPlayback()
+        return
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        playNeighbor(-1)
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        playNeighbor(1)
+        return
+      }
+
+      if (event.key.toLowerCase() === 'l' && currentTrackId) {
+        event.preventDefault()
+        toggleLoop(currentTrackId)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [currentTrackId, tracks, loopTrackId])
 
   return (
     <main className="app-shell">
@@ -568,6 +647,10 @@ function App() {
             ) : (
               <p>{text.idlePlayer}</p>
             )}
+            <p className="shortcuts-hint">
+              <strong>{text.shortcuts}:</strong> {text.shortcutsHint}
+            </p>
+            <p className="auto-dj-hint">{text.autoDj}</p>
           </div>
           <div className="now-playing-controls">
             <button type="button" onClick={() => playNeighbor(-1)} disabled={!tracks.length}>
@@ -575,21 +658,7 @@ function App() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (!currentTrackId) {
-                  if (tracks[0]) playTrackById(tracks[0].id)
-                  return
-                }
-                const audio = audioRefs.current[currentTrackId]
-                if (!audio) return
-                if (audio.paused) {
-                  void audio.play().catch(() => {
-                    setIsCurrentPlaying(false)
-                  })
-                } else {
-                  audio.pause()
-                }
-              }}
+              onClick={toggleCurrentPlayback}
               disabled={!tracks.length}
             >
               {isCurrentPlaying ? text.pause : text.play}
@@ -646,6 +715,7 @@ function App() {
                 onPlay={(event) => {
                   pauseAllExcept(track.id)
                   event.currentTarget.loop = loopTrackId === track.id
+                  playedTrackIdsRef.current.add(track.id)
                   setCurrentTrackId(track.id)
                   setIsCurrentPlaying(true)
                   setCurrentTime(event.currentTarget.currentTime || 0)
@@ -670,6 +740,12 @@ function App() {
                   if (currentTrackId === track.id) {
                     setIsCurrentPlaying(false)
                     setCurrentTime(0)
+                    if (loopTrackId !== track.id) {
+                      const nextTrackId = getSmartNextTrackId(track.id)
+                      if (nextTrackId !== null) {
+                        playTrackById(nextTrackId)
+                      }
+                    }
                   }
                 }}
               />

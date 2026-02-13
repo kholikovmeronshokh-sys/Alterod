@@ -329,6 +329,13 @@
   color: rgba(226, 232, 240, 0.86);
 }
 
+.shortcuts-hint,
+.auto-dj-hint {
+  margin-top: 0.32rem;
+  font-size: 0.72rem;
+  color: rgba(191, 219, 254, 0.88);
+}
+
 .now-playing-controls {
   display: flex;
   gap: 0.35rem;
