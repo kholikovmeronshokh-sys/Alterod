@@ -41,6 +41,11 @@ type Benefit = {
   desc: LocalizedText
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
+
 const TRACK_LIMIT = 20
 
 function formatTime(totalSeconds: number): string {
@@ -77,9 +82,10 @@ const copy = {
     share: 'Share',
     shareCopied: 'Track link copied',
     shareFailed: 'Could not share this track',
-    autoDj: 'Auto-DJ smart shuffle is on',
+    autoDj: 'Auto-DJ is on: plays next track in order',
     shortcuts: 'Shortcuts',
     shortcutsHint: 'Space play/pause, Left/Right prev-next, L loop',
+    installApp: 'Install App',
   },
   ru: {
     heroTitle: 'Музыкальный mood-движок для продуктовых команд',
@@ -107,9 +113,10 @@ const copy = {
     share: 'Поделиться',
     shareCopied: 'Ссылка на трек скопирована',
     shareFailed: 'Не удалось поделиться треком',
-    autoDj: 'Auto-DJ и умный shuffle включены',
+    autoDj: 'Auto-DJ включен: треки идут по порядку',
     shortcuts: 'Клавиши',
     shortcutsHint: 'Space пуск/пауза, Left/Right назад-вперед, L повтор',
+    installApp: 'Установить',
   },
 } as const
 
@@ -267,9 +274,9 @@ function App() {
   const [duration, setDuration] = useState(0)
   const [loopTrackId, setLoopTrackId] = useState<number | null>(null)
   const [shareNotice, setShareNotice] = useState('')
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
   const trackCache = useRef<Partial<Record<MoodId, Track[]>>>({})
   const audioRefs = useRef<Record<number, HTMLAudioElement | null>>({})
-  const playedTrackIdsRef = useRef<Set<number>>(new Set())
 
   const activeMood = useMemo(
     () => MOODS.find((mood) => mood.id === activeMoodId) ?? MOODS[0],
@@ -326,18 +333,11 @@ function App() {
     playTrackById(nextTrack.id)
   }
 
-  function getSmartNextTrackId(currentId: number): number | null {
-    const candidates = tracks.filter((track) => track.id !== currentId)
-    if (!candidates.length) return null
-
-    let unplayed = candidates.filter((track) => !playedTrackIdsRef.current.has(track.id))
-    if (!unplayed.length) {
-      playedTrackIdsRef.current = new Set([currentId])
-      unplayed = candidates
-    }
-
-    const randomIndex = Math.floor(Math.random() * unplayed.length)
-    return unplayed[randomIndex]?.id ?? null
+  function getNextTrackInOrder(currentId: number): number | null {
+    const index = tracks.findIndex((track) => track.id === currentId)
+    if (index < 0 || tracks.length < 2) return null
+    const nextIndex = index + 1 >= tracks.length ? 0 : index + 1
+    return tracks[nextIndex]?.id ?? null
   }
 
   function setSingleLoopTrack(trackId: number | null) {
@@ -415,8 +415,6 @@ function App() {
     setIsCurrentPlaying(false)
     setCurrentTime(0)
     setDuration(0)
-    playedTrackIdsRef.current = new Set()
-
     const cached = trackCache.current[activeMood.id]
     if (cached?.length) {
       setTracks(cached)
@@ -506,6 +504,25 @@ function App() {
   }, [shareNotice])
 
   useEffect(() => {
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPromptEvent(event as BeforeInstallPromptEvent)
+    }
+
+    const onAppInstalled = () => {
+      setInstallPromptEvent(null)
+    }
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+    window.addEventListener('appinstalled', onAppInstalled)
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', onAppInstalled)
+    }
+  }, [])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const isTypingContext =
@@ -551,27 +568,42 @@ function App() {
       <header className="hero">
         <div className="hero-topbar">
           <p className="eyebrow">Alterod</p>
-          <div className="lang-switch" role="group" aria-label={text.language}>
-            <button
-              type="button"
-              className={lang === 'en' ? 'active' : ''}
-              onClick={() => {
-                setLang('en')
-                syncPathWithLang('en')
-              }}
-            >
-              EN
-            </button>
-            <button
-              type="button"
-              className={lang === 'ru' ? 'active' : ''}
-              onClick={() => {
-                setLang('ru')
-                syncPathWithLang('ru')
-              }}
-            >
-              RU
-            </button>
+          <div className="hero-actions">
+            {installPromptEvent ? (
+              <button
+                type="button"
+                className="install-btn"
+                onClick={async () => {
+                  await installPromptEvent.prompt()
+                  await installPromptEvent.userChoice
+                  setInstallPromptEvent(null)
+                }}
+              >
+                {text.installApp}
+              </button>
+            ) : null}
+            <div className="lang-switch" role="group" aria-label={text.language}>
+              <button
+                type="button"
+                className={lang === 'en' ? 'active' : ''}
+                onClick={() => {
+                  setLang('en')
+                  syncPathWithLang('en')
+                }}
+              >
+                EN
+              </button>
+              <button
+                type="button"
+                className={lang === 'ru' ? 'active' : ''}
+                onClick={() => {
+                  setLang('ru')
+                  syncPathWithLang('ru')
+                }}
+              >
+                RU
+              </button>
+            </div>
           </div>
         </div>
 
@@ -715,7 +747,6 @@ function App() {
                 onPlay={(event) => {
                   pauseAllExcept(track.id)
                   event.currentTarget.loop = loopTrackId === track.id
-                  playedTrackIdsRef.current.add(track.id)
                   setCurrentTrackId(track.id)
                   setIsCurrentPlaying(true)
                   setCurrentTime(event.currentTarget.currentTime || 0)
@@ -741,7 +772,7 @@ function App() {
                     setIsCurrentPlaying(false)
                     setCurrentTime(0)
                     if (loopTrackId !== track.id) {
-                      const nextTrackId = getSmartNextTrackId(track.id)
+                      const nextTrackId = getNextTrackInOrder(track.id)
                       if (nextTrackId !== null) {
                         playTrackById(nextTrackId)
                       }
