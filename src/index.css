@@ -1,0 +1,30 @@
+﻿:root {
+  --app-gradient: linear-gradient(135deg, #0f172a 0%, #1d4ed8 45%, #38bdf8 100%);
+  --accent: #38bdf8;
+  --card-bg: rgba(15, 23, 42, 0.65);
+  --text-strong: #eef2ff;
+  --text-soft: rgba(226, 232, 240, 0.85);
+  --line: rgba(148, 163, 184, 0.28);
+  font-family: 'Manrope', 'Segoe UI', 'Arial', sans-serif;
+  line-height: 1.45;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #020617;
+  color: var(--text-strong);
+}
+
+a {
+  color: inherit;
+}
